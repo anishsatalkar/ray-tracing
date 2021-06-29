@@ -17,14 +17,41 @@ class Ray(object):
     def hit(self):
         pass
 
+    def render_pixel(self, point_on_line_point):
+        object_reference = None
+        illumination_intensity = None
+        for initial_intersection_object in self.world.objects:
+            illumination_intensity = None
+            object_reference = initial_intersection_object
+            if initial_intersection_object.type == 'sphere':
+                initial_intersection_closest_point, initial_intersection_farthest_point = \
+                    self._handle_sphere_intersection(
+                        point_on_line_point,
+                        np.array([0, 0, 0]),
+                        initial_intersection_object)
+                if initial_intersection_closest_point is not None:
+                    illumination_intensity = self._cast_shadow_rays(initial_intersection_closest_point,
+                                                                    initial_intersection_object)
+                    break
+            elif initial_intersection_object.type == 'plane':
+                pass
+            else:
+                print(f'Skipping object {initial_intersection_object} since its not a sphere or a plane')
+        if illumination_intensity:
+            return min(255, object_reference.colour[0] * illumination_intensity), \
+                   min(255, object_reference.colour[1] * illumination_intensity), \
+                   min(255, object_reference.colour[2] * illumination_intensity)
+            # return 250, 250, 250
+        return 0, 0, 0
+
     def begin(self, xcor, ycor, zcor):
         xd, yd, zd = self._get_component_deltas(xcor, ycor, zcor)
         P = np.array([xcor, ycor, zcor])
         vector_along_pixel = np.array([xcor, ycor, zcor]) - np.array([self.x, self.y, self.z])
-        U = vector_along_pixel / (vector_along_pixel **2).sum() ** 0.5
+        U = vector_along_pixel / (vector_along_pixel ** 2).sum() ** 0.5
         iterations = 0
         # color = (224, 236, 255)
-        color = BaseObject.DARK_GRAY
+        color = BaseObject.BLACK
         while iterations <= 50 and self.hit_count < 3:
             has_hit_obstacle, td_object = self.world.hit_obstacle(self.x, self.y, self.z)
             if has_hit_obstacle:
@@ -64,7 +91,6 @@ class Ray(object):
         base_hypo = Util.get_hypotenuse_distance(xdiff, zdiff)
         three_d_hypo = Util.get_hypotenuse_distance(base_hypo, ydiff)
         sin_y = ydiff / three_d_hypo
-        cos_y = base_hypo / three_d_hypo
 
         y_to_travel = 1 * sin_y
 
@@ -80,3 +106,76 @@ class Ray(object):
             return d - 2 * (np.dot(d, n)) * (n / np.sqrt(np.sum(n ** 2)))
         else:
             return (d - 2 * (np.dot(d, n)) * (n / np.sqrt(np.sum(n ** 2)))) + randrange(-5, 5)
+
+    def _handle_sphere_intersection(self, line_on_point, ray_start_point, obj):
+        C = np.array([obj.centre.xc(), obj.centre.yc(), obj.centre.zc()])
+        r = obj.radius
+        P = line_on_point
+        vector_along_pixel = line_on_point - ray_start_point
+        U = vector_along_pixel / (vector_along_pixel ** 2).sum() ** 0.5
+
+        Q = P - C
+        a = np.dot(U, U)
+        b = 2 * np.dot(U, Q)
+        c = np.dot(Q, Q) - r * r
+        d = b * b - 4 * a * c
+        if d >= 0:
+            roots = np.roots([a, b, c])
+            r1, r2 = roots[0], roots[1]
+            # if r1 >= 0: TODO Can this be used for intersections behind the sphere in the case of shadow rays?
+            poi_1 = P + r1 * U
+            dist_poi_1 = np.linalg.norm(poi_1 - line_on_point)
+            # if r2 >= 0: TODO Can this be used for intersections behind the sphere in the case of shadow rays?
+            poi_2 = P + r2 * U
+            dist_poi_2 = np.linalg.norm(poi_2 - line_on_point)
+
+            # print(f'Intersects for pixel {line_on_point}, Point 1 : {poi_1},  '
+            #       f'Point 2 : {poi_2} Dist poi_1 : {dist_poi_1} Dist poi_2 : {dist_poi_2}')
+            if dist_poi_1 and dist_poi_2:
+                return (poi_1, poi_2) if dist_poi_1 <= dist_poi_2 else (poi_2, poi_1)
+            elif dist_poi_1 and not dist_poi_2:
+                return poi_1, None
+            elif dist_poi_2 and not dist_poi_1:
+                return poi_2, None
+            else:
+                return None, None
+        else:
+            return None, None
+
+    def _handle_plane_intersection(self, xcor, ycor, zcor, obj):
+        pass
+
+    def _cast_shadow_rays(self, initial_ray_intersection_point, initial_intersection_object):
+        for shadow_ray_object in self.world.objects:
+            if shadow_ray_object.type == 'sphere':
+                shadow_ray_intersection_closest_point, shadow_ray_intersection_farthest_point = \
+                    self._handle_sphere_intersection(self.world.light_source_point, initial_ray_intersection_point,
+                                                     shadow_ray_object)
+                if shadow_ray_object == initial_intersection_object:
+                    if not np.allclose(shadow_ray_intersection_closest_point, initial_ray_intersection_point):
+                        return None
+                else:
+                    if shadow_ray_intersection_closest_point is not None and shadow_ray_intersection_closest_point.any():
+                        if Ray._is_intersection_between_two_points(initial_ray_intersection_point,
+                                                                   shadow_ray_intersection_closest_point,
+                                                                   shadow_ray_intersection_farthest_point,
+                                                                   self.world.light_source_point):
+                            return None
+                            # pass
+        return self._get_light_intensity(initial_ray_intersection_point)
+
+    def _get_light_intensity(self, intersection_point):
+        return self.world.ILLU_INTENSITY_CONST / np.linalg.norm(self.world.light_source_point - intersection_point)
+
+    @staticmethod
+    def _is_intersection_between_two_points(initial_ray_intersection_point,
+                                            shadow_ray_intersection_closest_point,
+                                            shadow_ray_intersection_farthest_point,
+                                            light_source_point):
+        if not shadow_ray_intersection_closest_point.any():
+            raise Exception('Ray must intersect')
+        initial_intersection_lightsource_distance = np.linalg.norm(light_source_point - initial_ray_intersection_point)
+        shadow_ray_intersection_distance = np.linalg.norm(light_source_point - shadow_ray_intersection_closest_point)
+        if shadow_ray_intersection_distance < initial_intersection_lightsource_distance:
+            return True
+        return False

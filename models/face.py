@@ -22,4 +22,4 @@ class Face(object):
                           vertex.yc() - len / 2,
                           vertex.zc())
 
-        return [vertex_1,vertex_2,vertex_3,vertex_4]
+        return [vertex_1, vertex_2, vertex_3, vertex_4]

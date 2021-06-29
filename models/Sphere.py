@@ -9,6 +9,7 @@ class Sphere(BaseObject):
         self.radius = radius
         self.is_light_source = is_light_source
         self.material = material
+        self.type = BaseObject.SPHERE
 
     def __str__(self):
         return f"[{self.__class__}, centre={self.centre}, r={self.radius}, is_light_source={self.is_light_source}]"
